@@ -1,19 +1,16 @@
 <#
 .SYNOPSIS
-    Scan staged Git files for potential secrets.
+    Scan staged Git content for secrets and dangerous files.
 
 .DESCRIPTION
-    This script checks staged files for patterns that match common secret types:
-    - Passwords (pwd=, password=, passwd=)
-    - API keys (api_key, apikey, client_secret)
-    - Tokens (access_token, Bearer, refresh_token)
-    - Private keys (BEGIN PRIVATE KEY, BEGIN RSA PRIVATE KEY, etc.)
-    - Connection strings with passwords
-    - Oracle credentials (ORACLE_PWD, ORACLE_EQUITY_LAB_PWD)
+    This script checks STAGED (indexed) files for:
+    - High-risk file types (.pfx, .p12, .key, .pem, .keystore, .env files)
+    - Secret patterns in text content (passwords, tokens, keys, connection strings)
 
-    Run BEFORE commits to prevent secrets from being published.
+    Reads exact staged content using "git show :<path>" to check the index,
+    not the working tree.
 
-    Exit code: 0 if safe, 1 if secrets detected.
+    Exit code: 0 if safe, nonzero if secrets/dangerous files detected.
 
 .PARAMETER NoExit
     If set, do not exit with error code (used for testing).
@@ -27,99 +24,131 @@ $ErrorActionPreference = 'Continue'
 
 Write-Host "Scanning staged files for secrets..." -ForegroundColor Cyan
 
-# List of patterns that indicate secrets
+# High-risk file types that should never be staged
+$dangerousExtensions = @('.pfx', '.p12', '.key', '.pem', '.keystore')
+$dangerousNames = @('.env', 'oracle.env', 'secrets.json')
+
+# Secret patterns to detect in text content
 $secretPatterns = @(
-    @{ pattern = 'password\s*='; description = 'Password assignment' },
-    @{ pattern = 'passwd\s*='; description = 'Password assignment (short form)' },
-    @{ pattern = 'pwd\s*='; description = 'Password abbreviation' },
+    @{ pattern = 'Password\s*='; description = 'Password assignment' },
+    @{ pattern = 'Pwd\s*='; description = 'Password abbreviation' },
+    @{ pattern = 'passwd\s*='; description = 'Password (Unix style)' },
     @{ pattern = 'ORACLE_PWD'; description = 'Oracle password variable' },
-    @{ pattern = 'ORACLE_EQUITY_LAB_PWD'; description = 'Oracle app password variable' },
+    @{ pattern = 'ORACLE_EQUITY_LAB_PWD'; description = 'App password variable' },
     @{ pattern = 'api_key|apikey'; description = 'API key' },
     @{ pattern = 'client_secret'; description = 'Client secret' },
     @{ pattern = 'access_token|refresh_token'; description = 'Token' },
-    @{ pattern = 'Bearer\s+[A-Za-z0-9\-_.]+'; description = 'Bearer token' },
-    @{ pattern = 'BEGIN PRIVATE KEY|BEGIN RSA PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY'; description = 'Private key block' },
-    @{ pattern = 'AccountKey='; description = 'Azure account key' },
-    @{ pattern = 'SharedAccessSignature='; description = 'Azure shared access signature' },
-    @{ pattern = 'Secret='; description = 'Generic secret assignment' },
-    @{ pattern = 'User Id=.*Password='; description = 'Connection string with password' }
+    @{ pattern = 'Bearer\s+[A-Za-z0-9\-_.~\+/]+=*'; description = 'Bearer token' },
+    @{ pattern = 'BEGIN PRIVATE KEY|BEGIN RSA PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN EC PRIVATE KEY'; description = 'Private key block' },
+    @{ pattern = 'AccountKey\s*='; description = 'Azure account key' },
+    @{ pattern = 'SharedAccessSignature\s*='; description = 'Azure SAS' },
+    @{ pattern = 'User\s+Id\s*=.*Password\s*='; description = 'Connection string with password' }
 )
 
-# Get staged files from git index
+# Get list of staged files from git index
 $stagedFiles = git diff --cached --name-only 2>&1
-if($LASTEXITCODE -ne 0){
-    Write-Host "Error getting staged files: $stagedFiles" -ForegroundColor Red
-    if(-not $NoExit){ exit 1 }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Could not read staged files: $stagedFiles" -ForegroundColor Red
+    if (-not $NoExit) { exit 1 }
     return 1
 }
 
-if(-not $stagedFiles){
-    Write-Host "No staged files to check." -ForegroundColor Green
-    if(-not $NoExit){ exit 0 }
+if (-not $stagedFiles) {
+    Write-Host "[OK] No staged files to check." -ForegroundColor Green
+    if (-not $NoExit) { exit 0 }
     return 0
 }
 
-# Directories to skip
-$skipPatterns = @('\\bin\\', '\\obj\\', '\\.vs\\', '\\.git\\', '\\TestResults\\', '\\packages\\', '\\scripts\\Test-Secrets.ps1$')
-
-$secretsFound = 0
+$foundIssues = 0
 
 # Check each staged file
-foreach($file in $stagedFiles){
+foreach ($file in $stagedFiles) {
+    # Skip git internals
+    if ($file -match '^\\.git') {
+        continue
+    }
+
+    # Check for dangerous file extensions
+    $extension = [System.IO.Path]::GetExtension($file).ToLower()
+    if ($dangerousExtensions -contains $extension) {
+        Write-Host "[DANGER] Staged high-risk file type: $file" -ForegroundColor Red
+        Write-Host "         File extension: $extension" -ForegroundColor Red
+        Write-Host "         Action: Remove this file before committing" -ForegroundColor Red
+        Write-Host ""
+        $foundIssues++
+        continue
+    }
+
+    # Check for dangerous filenames
+    $filename = [System.IO.Path]::GetFileName($file).ToLower()
+    if ($dangerousNames -contains $filename) {
+        Write-Host "[DANGER] Staged dangerous file: $file" -ForegroundColor Red
+        Write-Host "         Action: Remove this file before committing" -ForegroundColor Red
+        Write-Host ""
+        $foundIssues++
+        continue
+    }
+
+    # Check for .env.* patterns
+    if ($file -match '\\.env\\..+$' -or $file -match '\\.env$') {
+        Write-Host "[DANGER] Staged .env file: $file" -ForegroundColor Red
+        Write-Host "         Action: Remove this file before committing" -ForegroundColor Red
+        Write-Host ""
+        $foundIssues++
+        continue
+    }
+
     # Skip the secret scanner script itself
-    if($file -eq "scripts/Test-Secrets.ps1" -or $file -eq "scripts\Test-Secrets.ps1"){
+    if ($file -eq "scripts/Test-Secrets.ps1" -or $file -eq "scripts\Test-Secrets.ps1") {
         continue
     }
 
-    # Skip binary and build files
-    if($file -match '\.(exe|dll|pdb|nupkg|pfx|p12|key)$'){
+    # Skip binary files that we cannot safely inspect
+    if ($file -match '\\.exe$|\\.dll$|\\.pdb$|\\.nupkg$|\\.zip$|\\.jar$') {
         continue
     }
 
-    # Skip known safe directories
-    if($skipPatterns | Where-Object { $file -match $_ }){
+    # Skip build and IDE directories
+    if ($file -match '(^|\\\\)(bin|obj|.vs|.git|TestResults|packages|node_modules)(\\\\|$)') {
         continue
     }
 
-    # Check if file exists (it should, being staged)
-    $fullPath = Join-Path (git rev-parse --show-toplevel) $file
-    if(-not (Test-Path $fullPath)){
-        continue
-    }
-
-    # Read file content
-    try {
-        $content = Get-Content $fullPath -Raw -ErrorAction SilentlyContinue
-        if(-not $content){
-            continue
+    # Now read the STAGED content using git show :<path>
+    # This reads the exact blob from the index, not the working tree
+    $stagedContent = git show ":$file" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        # If we can't read it and it looks like it might be secret-bearing, fail closed
+        if ($file -match '(config|secret|password|credential|auth|key|token|\.json$|\.xml$|\.config$|\.js$|\.ts$|\.cs$)') {
+            Write-Host "[UNSAFE] Could not inspect staged file: $file" -ForegroundColor Red
+            Write-Host "         Action: Verify it contains no secrets, or remove it" -ForegroundColor Red
+            Write-Host ""
+            $foundIssues++
         }
-
-        # Check each secret pattern
-        foreach($secretTest in $secretPatterns){
-            if($content -match $secretTest.pattern){
-                Write-Host "[WARNING] SECRET FOUND in: $file" -ForegroundColor Yellow
-                Write-Host "   Type: $($secretTest.description)" -ForegroundColor Yellow
-                Write-Host "   Action: Remove the secret before committing" -ForegroundColor Yellow
-                Write-Host ""
-                $secretsFound++
-            }
-        }
-    }
-    catch {
-        # Skip files we can't read (binary, locked, etc.)
         continue
+    }
+
+    # Check staged content for secret patterns
+    foreach ($secretTest in $secretPatterns) {
+        if ($stagedContent -match $secretTest.pattern) {
+            Write-Host "[SECRET] Found in staged file: $file" -ForegroundColor Yellow
+            Write-Host "         Pattern: $($secretTest.description)" -ForegroundColor Yellow
+            Write-Host "         Action: Remove the secret before committing" -ForegroundColor Yellow
+            Write-Host ""
+            $foundIssues++
+        }
     }
 }
 
-if($secretsFound -gt 0){
-    Write-Host "============================================" -ForegroundColor Red
-    Write-Host "ABORT: Found $secretsFound potential secret(s)." -ForegroundColor Red
-    Write-Host "Remove them before committing." -ForegroundColor Red
-    Write-Host "============================================" -ForegroundColor Red
-    if(-not $NoExit){ exit 1 }
+# Report final result
+if ($foundIssues -gt 0) {
+    Write-Host ("=" * 50) -ForegroundColor Red
+    Write-Host "BLOCKED: Found $foundIssues security issue(s)." -ForegroundColor Red
+    Write-Host "Remove all secrets/dangerous files before committing." -ForegroundColor Red
+    Write-Host ("=" * 50) -ForegroundColor Red
+    if (-not $NoExit) { exit 1 }
     return 1
-}else{
-    Write-Host "[OK] No secrets detected in staged files" -ForegroundColor Green
-    if(-not $NoExit){ exit 0 }
+} else {
+    Write-Host "[OK] All staged content is safe." -ForegroundColor Green
+    if (-not $NoExit) { exit 0 }
     return 0
 }

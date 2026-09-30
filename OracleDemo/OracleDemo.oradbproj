@@ -52,7 +52,7 @@
   </ItemGroup>
   <ItemGroup>
     <DBRef Include="Database References\OracleEquityLab\">
-      <ConnectionString>USER ID=ORACLE_EQUITY_LAB;DATA SOURCE=127.0.0.1:1521/FREEPDB1;TNS_ADMIN="C:\Users\Christopher Peterson\Oracle\network\admin";PERSIST SECURITY INFO=True</ConnectionString>
+      <ConnectionString>USER ID=ORACLE_EQUITY_LAB;DATA SOURCE=127.0.0.1:1521/FREEPDB1;PERSIST SECURITY INFO=False</ConnectionString>
       <IsDefault>true</IsDefault>
     </DBRef>
   </ItemGroup>
