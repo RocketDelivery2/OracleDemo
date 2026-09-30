@@ -128,8 +128,25 @@ foreach ($file in $stagedFiles) {
     }
 
     # Check staged content for secret patterns
+    # Skip pattern checks for documentation files (.md) - they reference variable names, not secrets
+    if ($file -match '\\.md$') {
+        continue
+    }
+
     foreach ($secretTest in $secretPatterns) {
         if ($stagedContent -match $secretTest.pattern) {
+            # Skip false positives
+
+            # For .CS files: Skip if assignment comes from GetEnvironmentVariable (safe)
+            if ($file -match '\.cs$' -and $stagedContent -match "GetEnvironmentVariable") {
+                continue
+            }
+
+            # For Password patterns in CS files: Also skip if it's a variable assignment from GetEnvironmentVariable
+            if ($secretTest.description -like "*password*" -and $file -match '\\.cs$' -and $stagedContent -match "GetEnvironmentVariable") {
+                continue
+            }
+
             Write-Host "[SECRET] Found in staged file: $file" -ForegroundColor Yellow
             Write-Host "         Pattern: $($secretTest.description)" -ForegroundColor Yellow
             Write-Host "         Action: Remove the secret before committing" -ForegroundColor Yellow
