@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit hook: scan for secrets before allowing commit
+# This hook runs the Test-Secrets.ps1 script to prevent accidental secret commits.
+
+# Get the repository root
+repo_root=$(git rev-parse --show-toplevel)
+
+# Run the secret scan using PowerShell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$repo_root/scripts/Test-Secrets.ps1"
+
+# Exit with the PowerShell script's exit code
+exit $?

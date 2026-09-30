@@ -1,0 +1,48 @@
+# Visual Studio
+.vs/
+.vscode/
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.slnx.user
+
+# Artifacts and packages
+packages/
+artifacts/
+.artifacts/
+
+# Secrets and credentials (CRITICAL)
+.env
+.env.*
+*.env
+secrets.json
+appsettings.*.json
+connection.json
+
+# Oracle-specific secrets
+oracle.env
+Oracle.env
+
+# Private keys and certificates
+*.pfx
+*.p12
+*.key
+*.pem
+*.keystore
+
+# Visual Studio Online / Codespaces
+.vscode-container.env
+
+# Local application settings that may contain secrets
+launchSettings.json
+connectionStrings.local.json
+
+# macOS / Linux temp files
+.DS_Store
+*.swp
+*.swo
+*~
