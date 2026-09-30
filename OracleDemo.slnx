@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="OracleDemo/OracleDemo.oradbproj" Type="218574d1-ff94-4b95-8577-a6d58c11c315" />
+  <Project Path="OracleDemo.Api/OracleDemo.Api.csproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="OracleDemo.Tests/OracleDemo.Tests.csproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
 </Solution>

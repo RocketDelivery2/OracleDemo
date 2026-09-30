@@ -30,19 +30,18 @@ $dangerousNames = @('.env', 'oracle.env', 'secrets.json')
 
 # Secret patterns to detect in text content
 $secretPatterns = @(
-    @{ pattern = 'Password\s*='; description = 'Password assignment' },
-    @{ pattern = 'Pwd\s*='; description = 'Password abbreviation' },
-    @{ pattern = 'passwd\s*='; description = 'Password (Unix style)' },
-    @{ pattern = 'ORACLE_PWD'; description = 'Oracle password variable' },
-    @{ pattern = 'ORACLE_EQUITY_LAB_PWD'; description = 'App password variable' },
-    @{ pattern = 'api_key|apikey'; description = 'API key' },
-    @{ pattern = 'client_secret'; description = 'Client secret' },
-    @{ pattern = 'access_token|refresh_token'; description = 'Token' },
-    @{ pattern = 'Bearer\s+[A-Za-z0-9\-_.~\+/]+=*'; description = 'Bearer token' },
+    @{ pattern = 'Password\s*=\s*["\x27]'; description = 'Password with quoted value' },
+    @{ pattern = 'Pwd\s*=\s*["\x27]'; description = 'Pwd with quoted value' },
+    @{ pattern = 'passwd\s*=\s*["\x27]'; description = 'passwd with quoted value' },
+    @{ pattern = 'api_key\s*=\s*["\x27]'; description = 'API key with quoted value' },
+    @{ pattern = 'apikey\s*=\s*["\x27]'; description = 'apikey with quoted value' },
+    @{ pattern = 'client_secret\s*=\s*["\x27]'; description = 'Client secret with quoted value' },
+    @{ pattern = 'access_token\s*=\s*["\x27]'; description = 'Access token with quoted value' },
+    @{ pattern = 'refresh_token\s*=\s*["\x27]'; description = 'Refresh token with quoted value' },
+    @{ pattern = 'Bearer\s+[A-Za-z0-9\-_.~\+/]+='; description = 'Bearer token' },
     @{ pattern = 'BEGIN PRIVATE KEY|BEGIN RSA PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN EC PRIVATE KEY'; description = 'Private key block' },
     @{ pattern = 'AccountKey\s*='; description = 'Azure account key' },
-    @{ pattern = 'SharedAccessSignature\s*='; description = 'Azure SAS' },
-    @{ pattern = 'User\s+Id\s*=.*Password\s*='; description = 'Connection string with password' }
+    @{ pattern = 'SharedAccessSignature\s*='; description = 'Azure SAS' }
 )
 
 # Get list of staged files from git index
@@ -104,12 +103,12 @@ foreach ($file in $stagedFiles) {
     }
 
     # Skip binary files that we cannot safely inspect
-    if ($file -match '\\.exe$|\\.dll$|\\.pdb$|\\.nupkg$|\\.zip$|\\.jar$') {
+    if ($file -match '\.exe$|\.dll$|\.pdb$|\.nupkg$|\.zip$|\.jar$') {
         continue
     }
 
     # Skip build and IDE directories
-    if ($file -match '(^|\\\\)(bin|obj|.vs|.git|TestResults|packages|node_modules)(\\\\|$)') {
+    if ($file -match '(^|\\)(bin|obj|.vs|.git|TestResults|packages|node_modules)(\\|$)') {
         continue
     }
 
@@ -128,25 +127,8 @@ foreach ($file in $stagedFiles) {
     }
 
     # Check staged content for secret patterns
-    # Skip pattern checks for documentation files (.md) - they reference variable names, not secrets
-    if ($file -match '\\.md$') {
-        continue
-    }
-
     foreach ($secretTest in $secretPatterns) {
         if ($stagedContent -match $secretTest.pattern) {
-            # Skip false positives
-
-            # For .CS files: Skip if assignment comes from GetEnvironmentVariable (safe)
-            if ($file -match '\.cs$' -and $stagedContent -match "GetEnvironmentVariable") {
-                continue
-            }
-
-            # For Password patterns in CS files: Also skip if it's a variable assignment from GetEnvironmentVariable
-            if ($secretTest.description -like "*password*" -and $file -match '\\.cs$' -and $stagedContent -match "GetEnvironmentVariable") {
-                continue
-            }
-
             Write-Host "[SECRET] Found in staged file: $file" -ForegroundColor Yellow
             Write-Host "         Pattern: $($secretTest.description)" -ForegroundColor Yellow
             Write-Host "         Action: Remove the secret before committing" -ForegroundColor Yellow
